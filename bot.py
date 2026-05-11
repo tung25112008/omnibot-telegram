@@ -301,8 +301,19 @@ async def cmd_quiz(message: Message) -> None:
         f"🧠 Chủ đề: {quiz.topic}\n\n"
         f"{hbold('Câu hỏi:')} {quiz.question}\n\n"
         f"{options}\n\n"
-        "Trả lời bằng A/B/C/D nhé."
+        "Trả lời bằng A/B/C/D nhé. Muốn thoát quiz: /cancelquiz"
     )
+
+
+async def cmd_cancel_quiz(message: Message) -> None:
+    if not message.from_user:
+        await message.answer("Không xác định được người dùng để hủy quiz.")
+        return
+
+    if pending_quiz.pop(message.from_user.id, None):
+        await message.answer("Đã hủy quiz hiện tại.")
+    else:
+        await message.answer("Bạn chưa có quiz nào đang chạy.")
 
 
 async def cmd_video(message: Message) -> None:
@@ -339,8 +350,20 @@ async def handle_quiz_answer(message: Message) -> bool:
 
     answer = message.text.strip().upper()
     mapping = {"A": 0, "B": 1, "C": 2, "D": 3}
+    cancel_tokens = {"HUY", "HỦY", "BO", "BỎ", "SKIP", "CANCEL", "/CANCELQUIZ"}
+
+    if answer in cancel_tokens:
+        pending_quiz.pop(user_id, None)
+        await message.answer("Đã hủy quiz. Bạn có thể chat bình thường hoặc /quiz lại.")
+        return True
+
     if answer not in mapping:
-        await message.answer("Bạn đang làm quiz. Trả lời bằng A/B/C/D nhé.")
+        # If user sends regular text, auto-exit quiz so they are not stuck.
+        pending_quiz.pop(user_id, None)
+        await message.answer(
+            "Mình đã thoát quiz vì bạn gửi tin nhắn thường. "
+            "Gõ /quiz để chơi lại nhé."
+        )
         return True
 
     quiz = pending_quiz.pop(user_id)
@@ -374,6 +397,7 @@ def register_handlers(dp: Dispatcher) -> None:
     dp.message.register(cmd_qr, Command("qr"))
     dp.message.register(cmd_meme, Command("meme"))
     dp.message.register(cmd_quiz, Command("quiz"))
+    dp.message.register(cmd_cancel_quiz, Command("cancelquiz"))
     dp.message.register(cmd_video, Command("video"))
     dp.message.register(handle_chat, F.text | F.caption)
 
