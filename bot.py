@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import io
 import logging
 import os
@@ -128,6 +129,7 @@ def build_openai_client() -> Optional[OpenAI]:
 
 OPENAI_CLIENT = build_openai_client()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1")
 
 
 def chat_completion(user_text: str) -> str:
@@ -193,6 +195,22 @@ def polish_image_prompt(vn_request: str) -> str:
             "A visually striking digital artwork inspired by "
             f"{vn_request}, dynamic composition, rich textures, 4k."
         )
+
+
+def generate_image_bytes(prompt: str) -> bytes:
+    if not OPENAI_CLIENT:
+        raise RuntimeError("MISSING_API_KEY")
+
+    response = OPENAI_CLIENT.images.generate(
+        model=OPENAI_IMAGE_MODEL,
+        prompt=prompt,
+        size="1024x1024",
+    )
+    data = response.data[0]
+    b64 = getattr(data, "b64_json", None)
+    if not b64:
+        raise RuntimeError("IMAGE_DATA_EMPTY")
+    return base64.b64decode(b64)
 
 
 def make_qr_png(data: str) -> bytes:
@@ -292,11 +310,35 @@ async def cmd_image(message: Message) -> None:
     if not args:
         await message.answer("Dùng: /image [mô tả ảnh], ví dụ: /image vẽ con mèo bay trong vũ trụ")
         return
+    await message.answer("Đang tạo ảnh cho bạn, chờ mình chút...")
     prompt = polish_image_prompt(args)
-    await message.answer(
-        f"{hbold('Prompt tiếng Anh tối ưu:')}\n{prompt}",
-        parse_mode=ParseMode.HTML,
-    )
+    try:
+        image_bytes = await asyncio.to_thread(generate_image_bytes, prompt)
+        photo = BufferedInputFile(image_bytes, filename="omnibot-image.png")
+        await message.answer_photo(
+            photo=photo,
+            caption="Ảnh đã tạo xong 🎨",
+        )
+    except RateLimitError:
+        await message.answer(
+            "Không tạo được ảnh vì API đang giới hạn hoặc hết quota.\n\n"
+            f"{hbold('Prompt tiếng Anh tối ưu:')}\n{prompt}",
+            parse_mode=ParseMode.HTML,
+        )
+    except Exception as exc:
+        logger.exception("Image generation failed")
+        if str(exc) == "MISSING_API_KEY":
+            await message.answer(
+                "Chưa có `OPENAI_API_KEY` nên chưa render ảnh trực tiếp được.\n\n"
+                f"{hbold('Prompt tiếng Anh tối ưu:')}\n{prompt}",
+                parse_mode=ParseMode.HTML,
+            )
+        else:
+            await message.answer(
+                "Mình chưa render ảnh được lúc này. Bạn thử lại sau nhé.\n\n"
+                f"{hbold('Prompt tiếng Anh tối ưu:')}\n{prompt}",
+                parse_mode=ParseMode.HTML,
+            )
 
 
 async def cmd_qr(message: Message) -> None:
