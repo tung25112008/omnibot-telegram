@@ -15,6 +15,7 @@ from aiogram.types import BufferedInputFile, Message
 from aiogram.utils.markdown import hbold
 from dotenv import load_dotenv
 from openai import OpenAI
+from openai import APIError, APIStatusError, RateLimitError
 from PIL import Image, ImageDraw, ImageFont
 import yt_dlp
 
@@ -135,15 +136,27 @@ def chat_completion(user_text: str) -> str:
             "Mình chưa được cấu hình AI API. Hãy set `OPENAI_API_KEY` để bật chat thông minh nhé."
         )
 
-    resp = OPENAI_CLIENT.chat.completions.create(
-        model=OPENAI_MODEL,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_text},
-        ],
-        temperature=0.7,
-    )
-    return resp.choices[0].message.content or "Mình chưa tạo được phản hồi, bạn thử lại nhé."
+    try:
+        resp = OPENAI_CLIENT.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_text},
+            ],
+            temperature=0.7,
+        )
+        return resp.choices[0].message.content or "Mình chưa tạo được phản hồi, bạn thử lại nhé."
+    except RateLimitError:
+        return (
+            "Hiện quota OpenAI đã hết hoặc đang bị giới hạn tốc độ. "
+            "Bạn nạp thêm billing hoặc thử lại sau nhé."
+        )
+    except (APIStatusError, APIError):
+        logger.exception("OpenAI API error in chat_completion")
+        return "Mình đang gặp lỗi khi gọi AI. Bạn thử lại sau ít phút nhé."
+    except Exception:
+        logger.exception("Unexpected error in chat_completion")
+        return "Mình tạm thời chưa trả lời AI được. Bạn thử lại sau nhé."
 
 
 def polish_image_prompt(vn_request: str) -> str:
@@ -152,15 +165,34 @@ def polish_image_prompt(vn_request: str) -> str:
             "A highly detailed digital artwork of "
             f"{vn_request}, cinematic lighting, rich color palette, ultra sharp focus, 4k."
         )
-    resp = OPENAI_CLIENT.chat.completions.create(
-        model=OPENAI_MODEL,
-        messages=[
-            {"role": "system", "content": "You are a world-class prompt engineer."},
-            {"role": "user", "content": PROMPT_IMAGE_POLISH + vn_request},
-        ],
-        temperature=0.8,
-    )
-    return resp.choices[0].message.content or "Could not generate prompt."
+    try:
+        resp = OPENAI_CLIENT.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": "You are a world-class prompt engineer."},
+                {"role": "user", "content": PROMPT_IMAGE_POLISH + vn_request},
+            ],
+            temperature=0.8,
+        )
+        return resp.choices[0].message.content or "Could not generate prompt."
+    except RateLimitError:
+        # Keep image command usable even when quota is exhausted.
+        return (
+            "A highly detailed digital artwork of "
+            f"{vn_request}, cinematic lighting, rich color palette, ultra sharp focus, 4k."
+        )
+    except (APIStatusError, APIError):
+        logger.exception("OpenAI API error in polish_image_prompt")
+        return (
+            "A cinematic, highly detailed scene based on "
+            f"{vn_request}, dramatic lighting, vivid colors, ultra high resolution, 4k."
+        )
+    except Exception:
+        logger.exception("Unexpected error in polish_image_prompt")
+        return (
+            "A visually striking digital artwork inspired by "
+            f"{vn_request}, dynamic composition, rich textures, 4k."
+        )
 
 
 def make_qr_png(data: str) -> bytes:
