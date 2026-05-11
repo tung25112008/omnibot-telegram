@@ -1,0 +1,6 @@
+aiogram>=3.7.0
+python-dotenv>=1.0.1
+openai>=1.40.0
+qrcode[pil]>=7.4.2
+Pillow>=10.4.0
+yt-dlp>=2025.1.26
